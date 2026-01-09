@@ -1,0 +1,110 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project specific - Credentials & Sensitive Data
+credentials.json
+secrets.json
+*.pem
+*.key
+
+# Project specific - Data & Logs
+data/
+logs/
+output/
+*.log
+*.csv
+*.json
+!package.json
+
+# Project specific - Browser & Session
+chromedriver*
+geckodriver*
+*.crx
+cookies.pkl
+session_data/
+
+# Project specific - Resumes & Assets (keep structure, ignore files)
+assets/resumes/*.pdf
+assets/resumes/*.doc
+assets/resumes/*.docx
+assets/photos/
+
+# Applied jobs tracking
+applied_jobs.txt
+applications.json
+
+# Screenshots
+screenshots/
+*.png
+*.jpg
+*.jpeg
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
