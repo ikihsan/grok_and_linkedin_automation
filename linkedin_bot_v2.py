@@ -42,12 +42,15 @@ class LinkedInBotV2:
         print(f"📧 Using email: {self.email}")
         print(f"🔑 Password: {'*' * len(self.password) if self.password else 'NOT SET'}")
         
-        # Search params - MERN/Backend priority
-        self.positions = ["MERN Stack Developer", "Backend Developer", "Node.js Developer", "Full Stack Developer", "Web Developer"]
-        self.locations = ["India", "Remote"]
+        # Search params - randomized on each start
+        self.positions = ["Backend Developer", "Node.js Developer", "Full Stack Developer", "Web Developer", "Software Developer", "MERN Stack Developer", "React Developer", "JavaScript Developer"]
+        random.shuffle(self.positions)  # Randomize positions order
+        # Search Kerala first, then India
+        self.locations = ["Kerala, India", "Kerala", "India", "Remote"]
+        print(f"🎲 Randomized search order. Starting with: {self.positions[0]}")
         
-        # Blacklist - minimal
-        self.title_blacklist = ["intern", "internship", "sales", "manager", "director"]
+        # Blacklist - exclude senior roles
+        self.title_blacklist = ["intern", "internship", "sales", "manager", "director", "senior", "sr ", "sr.", "lead", "principal", "staff"]
         self.company_blacklist = []
         
         # Stats
@@ -220,12 +223,22 @@ class LinkedInBotV2:
                 if not jobs:
                     break
                 
-                # Process each job
-                for i, job in enumerate(jobs):
+                # Process each job by index (re-fetch cards each time to avoid stale elements)
+                num_jobs = len(jobs)
+                for i in range(num_jobs):
                     try:
-                        print(f"\n   --- Job {i+1}/{len(jobs)} ---")
+                        print(f"\n   --- Job {i+1}/{num_jobs} ---")
+                        
+                        # Re-fetch job cards to get fresh elements
+                        current_jobs = self._get_job_cards()
+                        if i >= len(current_jobs):
+                            print("   ⚠️ Job index out of range - skipping")
+                            continue
+                        
+                        job = current_jobs[i]
                         self._process_job(job)
                         time.sleep(random.uniform(1, 3))
+                        
                     except StaleElementReferenceException:
                         print("   ⚠️ Stale element - skipping job")
                         continue
@@ -273,25 +286,90 @@ class LinkedInBotV2:
     
     def _process_job(self, job_card):
         """Process a single job"""
-        # Extract info
+        # First scroll the job card into view to ensure it loads
+        try:
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", job_card)
+            time.sleep(0.5)  # Wait for lazy loading
+        except:
+            pass
+        
+        # Get job URL first to check for duplicates
+        job_url = ""
+        try:
+            link_elem = job_card.find_element(By.CSS_SELECTOR, "a[href*='/jobs/view/']")
+            job_url = link_elem.get_attribute("href") or ""
+        except:
+            pass
+        
+        # Check if already applied
+        if job_url and app_logger.has_applied(job_url):
+            self.log(f"Already applied to this job - skipping", "WARN")
+            self.skipped_count += 1
+            return
+        
+        # Extract info with multiple selector strategies
         title = self._get_text(job_card, [
             ".job-card-list__title",
             ".job-card-container__link",
-            "a[href*='/jobs/view/']"
+            "a[href*='/jobs/view/']",
+            ".artdeco-entity-lockup__title",
+            "[data-control-name='job_card_title']",
+            "strong",
+            "a"
         ])
         
         company = self._get_text(job_card, [
             ".job-card-container__primary-description",
             ".artdeco-entity-lockup__subtitle",
-            ".job-card-container__company-name"
+            ".job-card-container__company-name",
+            ".artdeco-entity-lockup__caption",
+            "span.job-card-container__primary-description"
         ])
         
         self.log(f"Title: {title[:50] if title else 'N/A'}")
         self.log(f"Company: {company[:30] if company else 'N/A'}")
         
         if not title:
-            self.log("Could not get title", "ERROR")
-            return
+            # Try to get title from the details pane after clicking
+            self._click_job_card(job_card)
+            time.sleep(1.5)
+            
+            # Get job URL from current page if we didn't have it
+            if not job_url:
+                job_url = self.driver.current_url
+            
+            # Check again for duplicates
+            if job_url and app_logger.has_applied(job_url):
+                self.log(f"Already applied to this job - skipping", "WARN")
+                self.skipped_count += 1
+                return
+            
+            # Try to get from job details panel
+            title = self._get_text(self.driver, [
+                ".job-details-jobs-unified-top-card__job-title",
+                ".jobs-unified-top-card__job-title",
+                "h1.t-24",
+                "h1"
+            ])
+            company = self._get_text(self.driver, [
+                ".job-details-jobs-unified-top-card__company-name",
+                ".jobs-unified-top-card__company-name",
+                "a[data-tracking-control-name='public_jobs_topcard-org-name']"
+            ])
+            
+            if title:
+                self.log(f"Title (from panel): {title[:50]}")
+            else:
+                self.log("Could not get title", "ERROR")
+                return
+        else:
+            # Click on job card to load details
+            self._click_job_card(job_card)
+            time.sleep(1.5)
+            
+            # Get job URL from current page if we didn't have it
+            if not job_url:
+                job_url = self.driver.current_url
         
         # Check blacklist
         title_lower = title.lower()
@@ -301,16 +379,22 @@ class LinkedInBotV2:
                 self.skipped_count += 1
                 return
         
-        # Click on job card to load details
-        self._click_job_card(job_card)
-        time.sleep(2)
-        
         # Find and click Easy Apply button
         success = self._click_easy_apply_and_fill()
         
         if success:
             self.log(f"APPLIED: {title} @ {company}", "SUCCESS")
             self.applied_count += 1
+            
+            # Log successful application
+            app_logger.log_application(
+                company=company or "Unknown",
+                role=title or "Unknown",
+                url=job_url or self.driver.current_url,
+                platform="linkedin",
+                resume_used="default",
+                status="submitted"
+            )
         else:
             self.failed_count += 1
     
@@ -344,7 +428,7 @@ class LinkedInBotV2:
     
     def _click_easy_apply_and_fill(self) -> bool:
         """Find Easy Apply button, click it, and fill form"""
-        time.sleep(1)
+        time.sleep(1.5)
         
         # Find Easy Apply button
         easy_btn = self._find_easy_apply_button()
@@ -353,22 +437,49 @@ class LinkedInBotV2:
             self.log("No Easy Apply button found", "WARN")
             return False
         
-        # Click it
-        try:
-            self.log("Clicking Easy Apply button...", "DEBUG")
-            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", easy_btn)
-            time.sleep(0.3)
-            easy_btn.click()
-        except Exception as e:
-            self.log(f"Click failed, trying JS: {e}", "DEBUG")
-            self.driver.execute_script("arguments[0].click();", easy_btn)
+        # Click it with multiple attempts
+        clicked = False
+        for attempt in range(3):
+            try:
+                self.log(f"Clicking Easy Apply button (attempt {attempt + 1})...", "DEBUG")
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", easy_btn)
+                time.sleep(0.3)
+                
+                # Try regular click first
+                try:
+                    easy_btn.click()
+                    clicked = True
+                except:
+                    # Try JS click
+                    self.driver.execute_script("arguments[0].click();", easy_btn)
+                    clicked = True
+                
+                time.sleep(1.5)
+                
+                # Check if modal opened
+                if self._is_modal_open():
+                    break
+                    
+            except Exception as e:
+                self.log(f"Click attempt {attempt + 1} failed: {e}", "DEBUG")
+                time.sleep(0.5)
         
-        time.sleep(2)
+        time.sleep(1)
         
         # Check if modal opened
         if not self._is_modal_open():
             self.log("Modal didn't open", "ERROR")
-            return False
+            # Try one more time with fresh button search
+            easy_btn = self._find_easy_apply_button()
+            if easy_btn:
+                try:
+                    self.driver.execute_script("arguments[0].click();", easy_btn)
+                    time.sleep(2)
+                except:
+                    pass
+            
+            if not self._is_modal_open():
+                return False
         
         self.log("Modal opened - filling form", "DEBUG")
         
@@ -430,16 +541,31 @@ class LinkedInBotV2:
             ".jobs-easy-apply-modal",
             ".jobs-easy-apply-content",
             "[data-test-modal]",
-            ".artdeco-modal--layer-default"
+            ".artdeco-modal--layer-default",
+            "[aria-labelledby='jobs-apply-header']",
+            ".jobs-apply-modal",
+            "div[class*='easy-apply']",
+            "div[class*='jobs-apply']"
         ]
         
         for sel in selectors:
             try:
-                modal = self.driver.find_element(By.CSS_SELECTOR, sel)
-                if modal.is_displayed():
-                    return True
+                modals = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for modal in modals:
+                    if modal.is_displayed():
+                        return True
             except:
                 pass
+        
+        # Also check for form elements that indicate modal is open
+        try:
+            form_elements = self.driver.find_elements(By.CSS_SELECTOR, 
+                "div[class*='jobs-easy-apply'] input, div[class*='jobs-easy-apply'] button")
+            if len(form_elements) > 0:
+                return True
+        except:
+            pass
+            
         return False
     
     def _fill_and_submit(self) -> bool:
@@ -702,28 +828,87 @@ class LinkedInBotV2:
         try:
             checkboxes = self.driver.find_elements(By.CSS_SELECTOR,
                 ".jobs-easy-apply-content input[type='checkbox'], "
-                ".jobs-easy-apply-modal input[type='checkbox']"
+                ".jobs-easy-apply-modal input[type='checkbox'], "
+                "input[type='checkbox'], [role='checkbox']"
             )
+            
+            # Keywords for consent/agreement checkboxes
+            consent_keywords = [
+                'consent', 'agree', 'accept', 'approve', 'authorize', 'confirm',
+                'acknowledge', 'certify', 'understand', 'attest',
+                'i consent', 'i agree', 'i accept', 'i approve', 'i authorize',
+                'terms', 'privacy', 'policy', 'conditions', 'declaration'
+            ]
             
             for cb in checkboxes:
                 try:
-                    if not cb.is_displayed() or cb.is_selected():
+                    # Skip if already checked
+                    is_checked = cb.is_selected()
+                    if not is_checked:
+                        aria_checked = cb.get_attribute('aria-checked')
+                        is_checked = aria_checked == 'true'
+                    if is_checked:
                         continue
                     
                     question = self._get_question_for_element(cb)
                     q_lower = question.lower()
                     
-                    # Check agreement boxes
-                    if any(kw in q_lower for kw in ['agree', 'terms', 'consent', 'acknowledge', 'confirm']):
+                    # Check if this is a consent/agreement checkbox
+                    is_consent_box = any(kw in q_lower for kw in consent_keywords)
+                    
+                    # Always try to check consent boxes
+                    if is_consent_box or cb.is_displayed():
+                        checked = False
+                        
+                        # Method 1: Direct click
                         try:
                             cb.click()
+                            checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
                         except:
-                            # Try clicking label
+                            pass
+                        
+                        # Method 2: JavaScript click
+                        if not checked:
+                            try:
+                                self.driver.execute_script("arguments[0].click();", cb)
+                                checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                            except:
+                                pass
+                        
+                        # Method 3: Click label
+                        if not checked:
                             cb_id = cb.get_attribute("id")
                             if cb_id:
-                                label = self.driver.find_element(By.CSS_SELECTOR, f"label[for='{cb_id}']")
-                                label.click()
-                        self.log(f"Checked: {question[:40]}...", "DEBUG")
+                                try:
+                                    label = self.driver.find_element(By.CSS_SELECTOR, f"label[for='{cb_id}']")
+                                    label.click()
+                                    checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                                except:
+                                    pass
+                        
+                        # Method 4: Parent label
+                        if not checked:
+                            try:
+                                parent_label = cb.find_element(By.XPATH, './ancestor::label')
+                                parent_label.click()
+                                checked = True
+                            except:
+                                pass
+                        
+                        # Method 5: Set via JavaScript
+                        if not checked:
+                            try:
+                                self.driver.execute_script("""
+                                    arguments[0].checked = true;
+                                    arguments[0].setAttribute('checked', 'checked');
+                                    arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                                """, cb)
+                                checked = True
+                            except:
+                                pass
+                        
+                        if checked:
+                            self.log(f"✓ Checked: {question[:40]}...", "DEBUG")
                         
                 except Exception as e:
                     pass

@@ -108,11 +108,10 @@ if not USER_PROFILE:
         
         "job_preferences": {
             "desired_titles": [
-                "MERN Stack Developer",
+                "Web Developer",
                 "Backend Developer",
                 "Node.js Developer",
                 "Full Stack Developer",
-                "Web Developer",
                 "NestJS Developer",
                 "React Developer",
                 "JavaScript Developer",
@@ -200,18 +199,21 @@ if not USER_PROFILE:
 JOB_CRITERIA = {
     "required_titles": [
         # MERN Stack & Backend (Priority)
+        "node developer",
+         "web developer",
+        "backend developer",
+        "full stack developer",
+        
         "mern stack developer",
         "mern developer",
-        "backend developer",
-        "backend engineer",
+        
         "nodejs developer",
-        "node developer",
-        "node.js developer",
-        "full stack developer",
+        
+        
         "fullstack developer",
         "full-stack developer",
         "full stack engineer",
-        "web developer",
+       
         "nestjs developer",
         "react developer",
         "javascript developer",
@@ -248,7 +250,7 @@ JOB_CRITERIA = {
     "tech_match_threshold": 0.3,  # 30% overlap required - be more lenient
     
     "exclusions": {
-        "titles": ["internship", "sales rep", "account manager", "director", "vp ", "chief", "unpaid"],
+        "titles": ["internship", "sales rep", "account manager", "director", "vp ", "chief", "unpaid", "senior", "sr ", "sr.", "lead", "principal", "staff"],
         "keywords": ["unpaid", "commission only", "door-to-door", "volunteer", "equity only"],
         "companies": USER_PROFILE["job_preferences"]["exclude_companies"],
     },

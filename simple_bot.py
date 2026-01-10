@@ -659,8 +659,14 @@ class SimpleLinkedInBot:
             self.driver.quit()
             return
         
-        # Search keywords (MERN/Backend priority)
+        # Search keywords (randomized on each start)
         searches = [
+            ("MERN Stack Developer", "Kerala, India"),
+            ("Backend Developer", "Kerala, India"),
+            ("Node.js Developer", "Kerala, India"),
+            ("Full Stack Developer", "Kerala, India"),
+            ("Web Developer", "Kerala, India"),
+            ("Software Engineer", "Kerala, India"),
             ("MERN Stack Developer", "India"),
             ("Backend Developer", "India"),
             ("Node.js Developer", "India"),
@@ -668,6 +674,9 @@ class SimpleLinkedInBot:
             ("Web Developer", "India"),
             ("Software Engineer", "India"),
         ]
+        # Shuffle to randomize search order on each start
+        random.shuffle(searches)
+        print(f"🎲 Randomized search order. Starting with: {searches[0][0]} in {searches[0][1]}", flush=True)
         
         try:
             for keyword, location in searches:

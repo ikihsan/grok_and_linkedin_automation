@@ -51,9 +51,12 @@ class UltimateLinkedInBot:
         if not self.email or not self.password:
             print("❌ ERROR: LINKEDIN_EMAIL or LINKEDIN_PASSWORD not set in .env!")
         
-        # Job search params
-        self.positions = USER_PROFILE["job_preferences"]["desired_titles"][:5]
-        self.locations = ["Remote", "India", "Bangalore", "Mumbai", "United States"]
+        # Job search params - randomized on each start
+        self.positions = USER_PROFILE["job_preferences"]["desired_titles"].copy()
+        random.shuffle(self.positions)  # Randomize positions order each start
+        # Search Kerala first, then rest of India
+        self.locations = ["Kerala, India", "Kerala", "Kochi", "Kozhikode", "India", "Remote", "Bangalore", "Mumbai"]
+        print(f"🎲 Randomized search order. Starting with: {self.positions[0]}")
         
         # Blacklists
         self.company_blacklist = [c.lower() for c in USER_PROFILE["job_preferences"]["exclude_companies"]]
@@ -760,32 +763,100 @@ class UltimateLinkedInBot:
             pass
     
     def _fill_checkboxes(self):
-        """Fill checkboxes"""
+        """Fill checkboxes - especially consent/agreement checkboxes"""
         try:
+            # Find all checkboxes with broader selectors
             checkboxes = self.driver.find_elements(By.CSS_SELECTOR,
-                '.jobs-easy-apply-content input[type="checkbox"]'
+                '.jobs-easy-apply-content input[type="checkbox"], '
+                '.jobs-easy-apply-modal input[type="checkbox"], '
+                'input[type="checkbox"], [role="checkbox"]'
             )
+            
+            # Keywords for consent/agreement checkboxes
+            consent_keywords = [
+                'consent', 'agree', 'accept', 'approve', 'authorize', 'confirm',
+                'acknowledge', 'certify', 'understand', 'attest',
+                'i consent', 'i agree', 'i accept', 'i approve', 'i authorize',
+                'i confirm', 'i acknowledge', 'i certify', 'i understand',
+                'terms', 'privacy', 'policy', 'conditions', 'declaration',
+                'by checking', 'by clicking', 'by submitting'
+            ]
             
             for cb in checkboxes:
                 try:
-                    if not cb.is_displayed() or cb.is_selected():
+                    # Check if already checked
+                    is_checked = cb.is_selected()
+                    if not is_checked:
+                        aria_checked = cb.get_attribute('aria-checked')
+                        is_checked = aria_checked == 'true'
+                    if is_checked:
                         continue
                     
                     question = self._get_question_text(cb)
+                    question_lower = question.lower()
                     
-                    # Check if should be checked
-                    should_check = any(kw in question.lower() for kw in [
-                        'agree', 'terms', 'privacy', 'consent', 'acknowledge',
-                        'confirm', 'accept', 'authorize'
-                    ])
+                    # Check if this is a consent/agreement checkbox - ALWAYS check these
+                    is_consent_box = any(kw in question_lower for kw in consent_keywords)
                     
-                    if should_check:
+                    # Also check visible checkboxes
+                    try:
+                        is_visible = cb.is_displayed()
+                    except:
+                        is_visible = False
+                    
+                    if is_consent_box or is_visible:
+                        checked = False
+                        
+                        # Method 1: Direct click
                         try:
                             cb.click()
-                            print(f"      ☑️ Checked: {question[:40]}...")
+                            checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
                         except:
-                            label = self.driver.find_element(By.CSS_SELECTOR, f'label[for="{cb.get_attribute("id")}"]')
-                            label.click()
+                            pass
+                        
+                        # Method 2: JavaScript click
+                        if not checked:
+                            try:
+                                self.driver.execute_script("arguments[0].click();", cb)
+                                checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                            except:
+                                pass
+                        
+                        # Method 3: Click via label for attribute
+                        if not checked:
+                            cb_id = cb.get_attribute("id")
+                            if cb_id:
+                                try:
+                                    label = self.driver.find_element(By.CSS_SELECTOR, f'label[for="{cb_id}"]')
+                                    label.click()
+                                    checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                                except:
+                                    pass
+                        
+                        # Method 4: Click parent label
+                        if not checked:
+                            try:
+                                parent_label = cb.find_element(By.XPATH, './ancestor::label')
+                                parent_label.click()
+                                checked = True
+                            except:
+                                pass
+                        
+                        # Method 5: Set via JavaScript
+                        if not checked:
+                            try:
+                                self.driver.execute_script("""
+                                    arguments[0].checked = true;
+                                    arguments[0].setAttribute('checked', 'checked');
+                                    arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                                    arguments[0].dispatchEvent(new Event('click', {bubbles: true}));
+                                """, cb)
+                                checked = True
+                            except:
+                                pass
+                        
+                        if checked:
+                            print(f"      ☑️ Checked: {question[:40]}...")
                         
                 except Exception as e:
                     pass

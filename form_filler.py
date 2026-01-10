@@ -65,8 +65,14 @@ class FormFiller:
         if self._matches(q, ['address line 2', 'address 2', 'apt', 'suite']):
             return self.profile["location"]["address_line_2"]
         
-        if self._matches(q, ['city', 'town']):
-            return self.profile["location"]["city"]
+        if self._matches(q, ['city', 'town', 'location']):
+            loc = self.profile["location"]
+            city = loc.get("city", "")
+            state = loc.get("state", "")
+            country = loc.get("country", "")
+            # Return full location: City, State, Country
+            full_loc = f"{city}, {state}, {country}".replace(", , ", ", ").strip(", ")
+            return full_loc if full_loc else city
         
         if self._matches(q, ['state', 'province', 'region']):
             return self.profile["location"]["state"]
@@ -259,10 +265,17 @@ class FormFiller:
         if self._matches(q, ['state', 'region']):
             return self._find_option(options, ['kerala', self.profile["location"]["state"].lower()])
         
-        # ===== GENDER =====
+        # ===== GENDER - ALWAYS select Male =====
         if self._matches(q, ['gender', 'sex']):
-            gender = self.profile["personal"]["gender"].lower()
-            return self._find_option(options, [gender, 'prefer not'])
+            # First look for exact 'male' (not female)
+            for opt in options:
+                opt_lower = opt.lower().strip()
+                if opt_lower == 'male' or opt_lower == 'man':
+                    return opt
+                if ('male' in opt_lower or 'man' in opt_lower) and 'female' not in opt_lower and 'woman' not in opt_lower:
+                    return opt
+            # Fallback to prefer not to say
+            return self._find_option(options, ['prefer not', 'decline'])
         
         # ===== EEO QUESTIONS =====
         if self._matches(q, ['race', 'ethnicity']):
@@ -360,12 +373,22 @@ class FormFiller:
         """
         q = question.lower().strip()
         
-        # Always agree to terms/privacy
-        if self._matches(q, ['agree', 'terms', 'privacy', 'consent', 'policy']):
+        # Consent/agreement keywords - ALWAYS check these
+        consent_keywords = [
+            'consent', 'agree', 'accept', 'approve', 'authorize', 'confirm',
+            'acknowledge', 'certify', 'understand', 'attest',
+            'i consent', 'i agree', 'i accept', 'i approve', 'i authorize',
+            'i confirm', 'i acknowledge', 'i certify', 'i understand',
+            'terms', 'privacy', 'policy', 'conditions', 'declaration',
+            'by checking', 'by clicking', 'by submitting'
+        ]
+        
+        # Check for consent/agreement keywords
+        if any(kw in q for kw in consent_keywords):
             return True
         
         # Background check consent
-        if self._matches(q, ['background check', 'authorize', 'consent']):
+        if self._matches(q, ['background check', 'authorize']):
             return True
         
         # Remote work
@@ -376,8 +399,8 @@ class FormFiller:
         if self._matches(q, ['relocate']) and self.profile["location"]["willing_to_relocate"]:
             return True
         
-        # Default: don't check unknown checkboxes
-        return False
+        # Default: check the checkbox (safer to agree than not)
+        return True
     
     # =====================================================================
     # HELPER METHODS

@@ -41,9 +41,9 @@ class SmartFormFiller:
         online = p.get("online_profiles", {})
         skills = p.get("skills", {})
         
-        # Calculate years of experience
+        # Total years of experience - always set to 1
         work_exp = p.get("work_experience", [])
-        total_years = len(work_exp) if work_exp else 1
+        total_years = 1
         
         # Get all technologies from work experience
         all_techs = set()
@@ -68,8 +68,9 @@ class SmartFormFiller:
             "phone": personal.get("phone", ""),
             "mobile": personal.get("phone", ""),
             
-            # Location
-            "city": location.get("city", ""),
+            # Location - city should include full location
+            "city": f"{location.get('city', '')}, {location.get('state', '')}, {location.get('country', '')}".replace(', , ', ', ').strip(', '),
+            "location": f"{location.get('city', '')}, {location.get('state', '')}, {location.get('country', '')}".replace(', , ', ', ').strip(', '),
             "state": location.get("state", ""),
             "zip": location.get("zip_code", ""),
             "postal": location.get("zip_code", ""),
@@ -120,6 +121,10 @@ class SmartFormFiller:
             "work authorization", "right to work", "permission to work",
             "18 years", "at least 18", "over 18", "legal age",
             "background check", "agree to", "consent", "acknowledge",
+            "i consent", "i agree", "i approve", "i accept", "i acknowledge",
+            "i confirm", "i authorize", "i understand", "i certify",
+            "agree", "accept", "approve", "confirm", "authorize",
+            "terms and conditions", "privacy policy", "terms of service",
             "willing to relocate", "open to relocation",
             "comfortable with", "willing to",
             "us citizen", "permanent resident",
@@ -132,6 +137,38 @@ class SmartFormFiller:
             "disability", "veteran", "protected veteran",
             "have you been convicted", "criminal", "felony",
         ]
+    
+    def _calculate_experience_years(self, work_exp: List[Dict]) -> int:
+        """Calculate total years of experience from work history"""
+        from datetime import datetime
+        
+        if not work_exp:
+            return 1  # Default to 1 if no experience
+        
+        total_months = 0
+        for exp in work_exp:
+            try:
+                start_str = exp.get("start_date", "")
+                end_str = exp.get("end_date", "")
+                
+                if not start_str:
+                    continue
+                    
+                start = datetime.strptime(start_str, "%Y-%m")
+                
+                if end_str == "Present" or exp.get("is_current", False):
+                    end = datetime.now()
+                else:
+                    end = datetime.strptime(end_str, "%Y-%m")
+                
+                months = (end.year - start.year) * 12 + (end.month - start.month)
+                total_months += max(0, months)  # Avoid negative months
+            except (ValueError, TypeError):
+                # If date parsing fails, estimate 6 months per job
+                total_months += 6
+        
+        years = max(1, round(total_months / 12))  # At least 1 year, rounded
+        return years
     
     def fill_all_fields(self) -> int:
         """
@@ -401,72 +438,178 @@ class SmartFormFiller:
         return filled
     
     def _fill_checkboxes(self) -> int:
-        """Fill ALL checkboxes - always check them"""
+        """Fill ALL checkboxes - always check them, especially consent/agree boxes"""
         filled = 0
         
+        # Keywords that indicate a checkbox should definitely be checked
+        consent_keywords = [
+            'consent', 'agree', 'accept', 'approve', 'authorize', 'confirm',
+            'acknowledge', 'certify', 'understand', 'attest',
+            'i consent', 'i agree', 'i accept', 'i approve', 'i authorize',
+            'i confirm', 'i acknowledge', 'i certify', 'i understand',
+            'terms', 'privacy', 'policy', 'conditions', 'declaration',
+            'by checking', 'by clicking', 'by submitting'
+        ]
+        
         try:
-            # Find all checkboxes in the form
-            checkboxes = self.driver.find_elements(By.CSS_SELECTOR,
-                '.jobs-easy-apply-content input[type="checkbox"]')
+            # Find all checkboxes in the form - broader selectors
+            checkbox_selectors = [
+                '.jobs-easy-apply-content input[type="checkbox"]',
+                '.jobs-easy-apply-modal input[type="checkbox"]',
+                'input[type="checkbox"]',
+                '[role="checkbox"]'
+            ]
             
-            for cb in checkboxes:
+            all_checkboxes = []
+            for selector in checkbox_selectors:
+                try:
+                    found = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    all_checkboxes.extend(found)
+                except:
+                    pass
+            
+            # Remove duplicates
+            seen_ids = set()
+            unique_checkboxes = []
+            for cb in all_checkboxes:
+                try:
+                    cb_id = cb.get_attribute('id') or id(cb)
+                    if cb_id not in seen_ids:
+                        seen_ids.add(cb_id)
+                        unique_checkboxes.append(cb)
+                except:
+                    unique_checkboxes.append(cb)
+            
+            for cb in unique_checkboxes:
                 try:
                     # Skip if already checked
-                    if cb.is_selected():
+                    is_checked = cb.is_selected()
+                    if not is_checked:
+                        # Also check aria-checked attribute
+                        aria_checked = cb.get_attribute('aria-checked')
+                        is_checked = aria_checked == 'true'
+                    
+                    if is_checked:
                         continue
                     
-                    # Skip if not visible
-                    if not cb.is_displayed():
+                    # Check visibility
+                    is_visible = False
+                    try:
+                        is_visible = cb.is_displayed()
+                    except:
+                        pass
+                    
+                    if not is_visible:
                         # Try to find parent and check visibility
                         try:
                             parent = cb.find_element(By.XPATH, '..')
-                            if not parent.is_displayed():
-                                continue
+                            is_visible = parent.is_displayed()
                         except:
-                            continue
+                            pass
                     
                     question = self._get_field_question(cb)
+                    question_lower = question.lower()
                     print(f"         ☐ Checkbox: {question[:50]}...")
                     
-                    # ALWAYS try to check the checkbox
+                    # Check if this is a consent/agreement checkbox
+                    is_consent_box = any(kw in question_lower for kw in consent_keywords)
+                    
+                    # ALWAYS try to check consent boxes, optionally check others
+                    should_check = is_consent_box or is_visible
+                    
+                    if not should_check:
+                        print(f"            → Skipped (not consent/visible)")
+                        continue
+                    
                     checked = False
                     
                     # Method 1: Direct click
                     try:
                         cb.click()
-                        checked = True
-                        print(f"            → ✓ Checked (direct)")
+                        time.sleep(0.1)
+                        if cb.is_selected() or cb.get_attribute('aria-checked') == 'true':
+                            checked = True
+                            print(f"            → ✓ Checked (direct)")
                     except:
                         pass
                     
-                    # Method 2: Click via label
+                    # Method 2: JavaScript click on checkbox
+                    if not checked:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", cb)
+                            time.sleep(0.1)
+                            if cb.is_selected() or cb.get_attribute('aria-checked') == 'true':
+                                checked = True
+                                print(f"            → ✓ Checked (JS click)")
+                        except:
+                            pass
+                    
+                    # Method 3: Click via label using 'for' attribute
                     if not checked:
                         cb_id = cb.get_attribute('id')
                         if cb_id:
                             try:
                                 label = self.driver.find_element(By.CSS_SELECTOR, f'label[for="{cb_id}"]')
                                 label.click()
-                                checked = True
-                                print(f"            → ✓ Checked (via label)")
+                                time.sleep(0.1)
+                                checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                                if checked:
+                                    print(f"            → ✓ Checked (via label for)")
                             except:
                                 pass
                     
-                    # Method 3: JavaScript click
+                    # Method 4: Click parent label element
                     if not checked:
                         try:
-                            self.driver.execute_script("arguments[0].click();", cb)
-                            checked = True
-                            print(f"            → ✓ Checked (JS)")
+                            parent_label = cb.find_element(By.XPATH, './ancestor::label')
+                            parent_label.click()
+                            time.sleep(0.1)
+                            checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                            if checked:
+                                print(f"            → ✓ Checked (parent label)")
                         except:
                             pass
                     
-                    # Method 4: Click parent label
+                    # Method 5: Set checked attribute via JavaScript
                     if not checked:
                         try:
-                            parent = cb.find_element(By.XPATH, './ancestor::label')
-                            parent.click()
+                            self.driver.execute_script("""
+                                arguments[0].checked = true;
+                                arguments[0].setAttribute('checked', 'checked');
+                                arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                                arguments[0].dispatchEvent(new Event('click', {bubbles: true}));
+                            """, cb)
+                            time.sleep(0.1)
                             checked = True
-                            print(f"            → ✓ Checked (parent label)")
+                            print(f"            → ✓ Checked (JS set checked)")
+                        except:
+                            pass
+                    
+                    # Method 6: For role="checkbox", set aria-checked
+                    if not checked:
+                        try:
+                            role = cb.get_attribute('role')
+                            if role == 'checkbox':
+                                self.driver.execute_script("""
+                                    arguments[0].setAttribute('aria-checked', 'true');
+                                    arguments[0].click();
+                                """, cb)
+                                time.sleep(0.1)
+                                checked = True
+                                print(f"            → ✓ Checked (aria-checked)")
+                        except:
+                            pass
+                    
+                    # Method 7: Click on nearby clickable elements (spans, divs with checkbox styling)
+                    if not checked:
+                        try:
+                            # Try clicking sibling or nearby elements
+                            clickable = cb.find_element(By.XPATH, './following-sibling::*[1]')
+                            clickable.click()
+                            time.sleep(0.1)
+                            checked = cb.is_selected() or cb.get_attribute('aria-checked') == 'true'
+                            if checked:
+                                print(f"            → ✓ Checked (sibling click)")
                         except:
                             pass
                     
@@ -636,8 +779,14 @@ class SmartFormFiller:
             return self.profile.get("online_profiles", {}).get("github", "")
         if any(x in q for x in ['portfolio', 'website', 'personal site']):
             return self.profile.get("online_profiles", {}).get("portfolio", "")
-        if 'city' in q:
-            return self.profile.get("location", {}).get("city", "")
+        if 'city' in q or 'location' in q:
+            loc = self.profile.get("location", {})
+            city = loc.get("city", "")
+            state = loc.get("state", "")
+            country = loc.get("country", "")
+            # Return full location: City, State, Country
+            full_loc = f"{city}, {state}, {country}".replace(", , ", ", ").strip(", ")
+            return full_loc if full_loc else city
         if any(x in q for x in ['zip', 'postal']):
             return self.profile.get("location", {}).get("zip_code", "")
         
@@ -726,7 +875,12 @@ class SmartFormFiller:
         ]
         
         # Check if asking about total/overall experience
-        total_patterns = ['total', 'overall', 'professional', 'work experience', 'industry', 'relevant']
+        total_patterns = [
+            'total', 'overall', 'professional', 'work experience', 'industry', 'relevant',
+            'scalable', 'development', 'production', 'enterprise', 'commercial',
+            'paid', 'full-time', 'full time', 'working', 'hands-on', 'hands on',
+            'practical', 'real-world', 'real world', 'corporate', 'company'
+        ]
         if any(p in q for p in total_patterns):
             return 1  # Total experience = 1 year
         
@@ -786,11 +940,18 @@ class SmartFormFiller:
                     if pref in opt:
                         return options[i]
         
-        # Gender
+        # Gender - ALWAYS select Male
         if 'gender' in q:
+            # First try to find exact "male" (not female)
             for i, opt in enumerate(options_lower):
-                if 'male' in opt and 'female' not in opt:
+                opt_clean = opt.strip()
+                # Check for exact 'male' or 'man' - but NOT 'female' or 'woman'
+                if opt_clean == 'male' or opt_clean == 'man':
                     return options[i]
+                if ('male' in opt_clean or 'man' in opt_clean) and 'female' not in opt_clean and 'woman' not in opt_clean:
+                    return options[i]
+            # Fallback to prefer not to say
+            for i, opt in enumerate(options_lower):
                 if 'prefer not' in opt or 'decline' in opt:
                     return options[i]
         

@@ -39,7 +39,8 @@ class LinkedInEasyApply:
         
         # Job preferences
         self.positions = USER_PROFILE["job_preferences"]["desired_titles"][:5]  # Top 5
-        self.locations = ["India", "Remote", "Bangalore", "Mumbai"]
+        # Search Kerala first, then rest of India
+        self.locations = ["Kerala, India", "Kerala", "Kochi", "Kozhikode", "India", "Remote", "Bangalore", "Mumbai"]
         
         # Blacklists
         self.company_blacklist = [c.lower() for c in USER_PROFILE["job_preferences"]["exclude_companies"]]

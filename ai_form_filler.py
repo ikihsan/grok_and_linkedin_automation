@@ -361,9 +361,15 @@ CRITICAL RULES:
         if any(kw in q for kw in ['date of birth', 'dob', 'birth date']):
             return p['personal']['date_of_birth']
         
-        # ===== LOCATION =====
-        if any(kw in q for kw in ['city', 'town']):
-            return p['location']['city']
+        # ===== LOCATION - Return full location =====
+        if any(kw in q for kw in ['city', 'town', 'location']):
+            loc = p['location']
+            city = loc.get('city', '')
+            state = loc.get('state', '')
+            country = loc.get('country', '')
+            # Return full location: City, State, Country
+            full_loc = f"{city}, {state}, {country}".replace(", , ", ", ").strip(", ")
+            return full_loc if full_loc else city
         
         if any(kw in q for kw in ['state', 'province']):
             return p['location']['state']
@@ -480,9 +486,17 @@ CRITICAL RULES:
                 return self._find_match(options, ['yes', 'remote'])
             return self._find_match(options, ['no', 'hybrid', 'office'])
         
-        # Gender
+        # Gender - ALWAYS select Male
         if 'gender' in q:
-            return self._find_match(options, [p['personal']['gender'].lower(), 'prefer not'])
+            # First look for exact 'male' (not female)
+            for opt in options:
+                opt_lower = opt.lower().strip()
+                if opt_lower == 'male' or opt_lower == 'man':
+                    return opt
+                if ('male' in opt_lower or 'man' in opt_lower) and 'female' not in opt_lower and 'woman' not in opt_lower:
+                    return opt
+            # Fallback to prefer not to say
+            return self._find_match(options, ['prefer not', 'decline'])
         
         # Default: first non-placeholder option
         for opt in options:
