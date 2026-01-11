@@ -197,9 +197,9 @@ SALARY EXPECTATIONS: {p['job_preferences']['salary_expectations']['minimum']}-{p
                 if tech in q:
                     self.answer_cache[cache_key] = "1"
                     return "1"
-            # Unknown technology - return 0
-            self.answer_cache[cache_key] = "0"
-            return "0"
+            # Default to 1 year for any experience question (safer than 0)
+            self.answer_cache[cache_key] = "1"
+            return "1"
         
         # Experience questions without "year" keyword
         if 'experience' in q:
@@ -210,13 +210,10 @@ SALARY EXPECTATIONS: {p['job_preferences']['salary_expectations']['minimum']}-{p
                 if tech in q:
                     self.answer_cache[cache_key] = "1"
                     return "1"
-            # Total/overall experience
-            if any(kw in q for kw in ['total', 'overall', 'work', 'professional']):
-                self.answer_cache[cache_key] = "1"
-                return "1"
-            # Unknown technology experience - return 0
-            self.answer_cache[cache_key] = "0"
-            return "0"
+            # Total/overall experience or any experience question - default to 1
+            # This is safer than 0 as most jobs require some experience
+            self.answer_cache[cache_key] = "1"
+            return "1"
         
         # CRITICAL: Handle salary/CTC/notice period/experience BEFORE AI - always return numbers
         # CTC/Salary questions - catch all variations including "current/last drawn"
